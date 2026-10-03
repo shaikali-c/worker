@@ -595,6 +595,8 @@ function App() {
     });
     await refresh();
     setPendingWorker(null);
+    // Keep device ID for the next worker (same device all day), clear the name
+    setLastForm({ name: '', device: pendingWorker.deviceId });
     setScreen('form');
     showToast('Saved — ready for next worker');
   };
