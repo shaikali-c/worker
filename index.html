@@ -648,7 +648,12 @@ function App() {
   }, []);
 
   // ---- Flow transitions ----
-  const goForm = () => { setFormKey(k => k + 1); setScreen('form'); };
+  const goForm = () => {
+    // Fresh form: clear any carried-over values from the previous entry
+    setLastForm({ name: '', device: '' });
+    setFormKey(k => k + 1);
+    setScreen('form');
+  };
 
   const handleFormSubmit = ({ name, deviceId }) => {
     setLastForm({ name, device: deviceId });
@@ -667,8 +672,8 @@ function App() {
     });
     await refresh();
     setPendingWorker(null);
-    // Keep device ID for the next worker (same device all day), clear the name
-    setLastForm({ name: '', device: pendingWorker.deviceId });
+    // Reset both fields — the next worker starts on a clean form
+    setLastForm({ name: '', device: '' });
     setFormKey(k => k + 1);
     setScreen('form');
     showToast('Saved — ready for next worker');
