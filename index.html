@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
 <meta name="theme-color" content="#0b0b0c" />
-<title>ATELIER — Worker Capture</title>
+<title>Scale — Worker Capture</title>
 
 <!-- Fonts -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -56,13 +56,18 @@
     flex-shrink:0;}
   .brand{font-family:var(--serif);font-size:30px;line-height:1;letter-spacing:.01em;}
   .brand em{font-style:italic;color:var(--muted);}
-  .count{font-size:12px;color:var(--muted);letter-spacing:.14em;text-transform:uppercase;
-    padding-bottom:4px;font-weight:500;}
-  .count b{color:var(--accent);font-weight:600;}
+  .chip{border:1px solid var(--line);border-radius:30px;padding:9px 16px;
+    font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);
+    font-weight:500;transition:border-color .2s,color .2s,background .2s;line-height:1;}
+  .chip:active{border-color:var(--line-strong);color:var(--text);background:var(--surface-2);}
+  .chip b{color:var(--accent);font-weight:600;}
+  .chip.active-chip{background:var(--accent);color:#111;border-color:var(--accent);}
+  .chip.active-chip b{color:#111;}
 
   /* ---------- Views ---------- */
   .view{flex:1;overflow-y:auto;padding:26px 22px calc(env(safe-area-inset-bottom,0px) + 30px);
     animation:rise .35s cubic-bezier(.22,1,.36,1);}
+  .view.list-view{padding-bottom:110px;}
   @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 
   .eyebrow{font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--faint);
@@ -72,6 +77,17 @@
   .sub{color:var(--muted);font-size:14px;line-height:1.55;margin-bottom:34px;max-width:34ch;}
 
   /* ---------- Form ---------- */
+  .otp-row{display:flex;gap:12px;margin-bottom:6px;}
+  .otp-box{flex:1;height:64px;background:var(--surface);border:1px solid var(--line);
+    border-radius:var(--radius);display:flex;align-items:center;justify-content:center;
+    font-family:var(--serif);font-size:30px;color:var(--text);
+    border-bottom:3px solid var(--line);transition:border-color .15s, background .15s;
+    caret-color:var(--accent);}
+  .otp-box.filled{border-bottom-color:var(--accent);}
+  .otp-box.focused{border-bottom-color:var(--accent);background:var(--surface-2);}
+  .otp-box.error{border-bottom-color:var(--danger);}
+  .otp-hidden{position:absolute;opacity:0;pointer-events:none;height:0;width:0;}
+
   .field{margin-bottom:22px;}
   .field label{display:block;font-size:11px;letter-spacing:.18em;text-transform:uppercase;
     color:var(--muted);margin-bottom:10px;font-weight:500;}
@@ -150,8 +166,33 @@
   .empty-serif{font-family:var(--serif);font-style:italic;font-size:24px;color:var(--muted);
     margin-bottom:8px;}
 
-  .export-bar{position:sticky;bottom:0;padding:14px 0 4px;
-    background:linear-gradient(transparent, var(--bg) 30%);}
+  /* fixed bottom action bar — solid, never transparent */
+  .bottom-bar{position:fixed;bottom:0;left:0;right:0;z-index:40;
+    padding:14px 22px calc(env(safe-area-inset-bottom,0px) + 18px);
+    background:var(--bg);border-top:1px solid var(--line);}
+  .bottom-bar-inner{max-width:520px;margin:0 auto;}
+  .btn-new{width:100%;background:var(--accent);color:#111;border-radius:var(--radius);
+    padding:19px;font-size:15px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+    transition:transform .12s ease;}
+  .btn-new:active{transform:scale(.98);}
+
+  /* header dropdown */
+  .hdr-actions{position:relative;}
+  .menu-btn{width:38px;height:38px;border:1px solid var(--line);border-radius:50%;
+    display:flex;align-items:center;justify-content:center;color:var(--muted);
+    font-size:18px;letter-spacing:2px;line-height:1;padding-bottom:6px;
+    transition:border-color .2s,color .2s;}
+  .menu-btn:active{border-color:var(--line-strong);color:var(--text);}
+  .menu{position:absolute;top:46px;right:0;background:var(--surface-2);
+    border:1px solid var(--line-strong);border-radius:14px;min-width:190px;z-index:60;
+    overflow:hidden;animation:menuIn .18s cubic-bezier(.22,1,.36,1);transform-origin:top right;}
+  @keyframes menuIn{from{opacity:0;transform:scale(.92)}to{opacity:1;transform:scale(1)}}
+  .menu button{display:block;width:100%;text-align:left;padding:15px 18px;
+    font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:500;
+    color:var(--text);transition:background .15s;}
+  .menu button:active{background:var(--surface-3);}
+  .menu button.danger{color:var(--danger);}
+  .menu button:disabled{opacity:.4;}
 
   /* ---------- Toast ---------- */
   .toast{position:fixed;left:50%;transform:translateX(-50%) translateY(20px);
@@ -287,6 +328,49 @@ function Toast({ msg }) {
 }
 
 /* ============================================================
+   OTP-style 5-digit input
+============================================================ */
+function OtpInput({ value, onChange, error }) {
+  const [focused, setFocused] = useState(false);
+  const inputRef = useRef(null);
+  const boxes = [0, 1, 2, 3, 4];
+
+  return (
+    <div className="field" style={{position:'relative'}}>
+      <label>Device ID — 5 digits</label>
+      <div className="otp-row" onClick={() => inputRef.current && inputRef.current.focus()}>
+        {boxes.map(i => (
+          <div
+            key={i}
+            className={
+              'otp-box' +
+              (value[i] ? ' filled' : '') +
+              (focused && (i === value.length || (value.length === 5 && i === 4)) ? ' focused' : '') +
+              (error ? ' error' : '')
+            }
+          >
+            {value[i] || ''}
+          </div>
+        ))}
+      </div>
+      <input
+        ref={inputRef}
+        className="otp-hidden"
+        type="text"
+        inputMode="numeric"
+        pattern="\d*"
+        maxLength={5}
+        value={value}
+        onChange={e => onChange(e.target.value.replace(/\D/g, '').slice(0, 5))}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        autoComplete="off"
+      />
+    </div>
+  );
+}
+
+/* ============================================================
    View 1 — Worker form
 ============================================================ */
 function WorkerForm({ onSubmit, initialName, initialDevice }) {
@@ -330,21 +414,12 @@ function WorkerForm({ onSubmit, initialName, initialDevice }) {
           <div className="field-hint">{errors.name || ''}</div>
         </div>
 
-        <div className="field">
-          <label>Device ID — 5 digits</label>
-          <input
-            type="text"
-            inputMode="numeric"
-            pattern="\d*"
-            maxLength={5}
-            value={device}
-            onChange={e => setDevice(e.target.value.replace(/\D/g, '').slice(0, 5))}
-            placeholder="00000"
-            className={errors.device ? 'input-error' : ''}
-            enterKeyHint="go"
-          />
-          <div className="field-hint">{errors.device || ''}</div>
-        </div>
+        <OtpInput
+          value={device}
+          onChange={setDevice}
+          error={!!errors.device}
+        />
+        <div className="field-hint" style={{marginTop:10, marginBottom:22}}>{errors.device || ''}</div>
 
         <button type="submit" className="btn-primary">Open Camera</button>
       </form>
@@ -486,10 +561,10 @@ function CameraView({ worker, onComplete, onCancel, showToast }) {
 /* ============================================================
    View 3 — Worker list
 ============================================================ */
-function WorkerList({ workers, onDelete, onExport, exporting, onNew }) {
+function WorkerList({ workers, onDelete }) {
   const complete = workers.filter(w => w.workerPhoto && w.handPhoto).length;
   return (
-    <div className="view">
+    <div className="view list-view">
       <div className="list-head">
         <h2 className="list-title">Captured <em>workers</em></h2>
       </div>
@@ -527,15 +602,6 @@ function WorkerList({ workers, onDelete, onExport, exporting, onNew }) {
         ))
       )}
 
-      {workers.length > 0 && (
-        <div className="export-bar">
-          <button className="btn-primary" onClick={onExport} disabled={exporting}>
-            {exporting ? 'Building ZIP…' : 'Export ZIP'}
-          </button>
-        </div>
-      )}
-
-      <button className="btn-ghost" onClick={onNew}>+ New Worker</button>
     </div>
   );
 }
@@ -549,9 +615,12 @@ function App() {
   const [workers, setWorkers] = useState([]);
   const [pendingWorker, setPendingWorker] = useState(null);
   const [lastForm, setLastForm] = useState({ name: '', device: '' });
+  const [formKey, setFormKey] = useState(0);
   const [toast, setToast] = useState('');
   const [exporting, setExporting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const toastTimer = useRef(null);
 
   const showToast = useCallback(msg => {
@@ -576,7 +645,7 @@ function App() {
   }, []);
 
   // ---- Flow transitions ----
-  const goForm = () => setScreen('form');
+  const goForm = () => { setFormKey(k => k + 1); setScreen('form'); };
 
   const handleFormSubmit = ({ name, deviceId }) => {
     setLastForm({ name, device: deviceId });
@@ -597,6 +666,7 @@ function App() {
     setPendingWorker(null);
     // Keep device ID for the next worker (same device all day), clear the name
     setLastForm({ name: '', device: pendingWorker.deviceId });
+    setFormKey(k => k + 1);
     setScreen('form');
     showToast('Saved — ready for next worker');
   };
@@ -619,6 +689,17 @@ function App() {
     setDeleteTarget(null);
   };
 
+  const handleDeleteAll = async () => {
+    try {
+      await idbClear();
+      await refresh();
+      showToast('All workers deleted');
+    } catch {
+      showToast('Delete failed');
+    }
+    setConfirmDeleteAll(false);
+  };
+
   // ---- ZIP export ----
   const handleExport = async () => {
     if (exporting) return;
@@ -631,11 +712,20 @@ function App() {
         setExporting(false);
         return;
       }
+      const manifest = [];
       complete.forEach((w, i) => {
-        const folder = zip.folder(String(i + 1));
+        const n = String(i + 1);
+        const folder = zip.folder(n);
         folder.file('worker.jpg', w.workerPhoto);
         folder.file('hand.jpg', w.handPhoto);
+        manifest.push({
+          name: w.name,
+          deviceID: w.deviceId,
+          workerPhoto: n + '/worker.jpg',
+          hand: n + '/hand.jpg'
+        });
       });
+      zip.file('workers.json', JSON.stringify(manifest, null, 2));
       const blob = await zip.generateAsync({
         type: 'blob',
         compression: 'DEFLATE',
@@ -659,26 +749,54 @@ function App() {
   return (
     <div className="app">
       <div className="header">
-        <div className="brand">Atelier<em>.</em></div>
-        <div className="count"><b>{workers.length}</b> captured</div>
+        <div className="brand">Scale</div>
+        <div style={{display:'flex',alignItems:'center',gap:10}}>
+          <button
+            className={'chip' + (screen === 'list' ? ' active-chip' : '')}
+            onClick={() => setScreen('list')}
+          >
+            <b>{workers.length}</b> captured
+          </button>
+          {screen === 'list' && (
+            <div className="hdr-actions">
+              <button className="menu-btn" onClick={() => setMenuOpen(o => !o)} aria-label="Options">···</button>
+              {menuOpen && (
+                <div className="menu">
+                  <button onClick={() => { setMenuOpen(false); handleExport(); }} disabled={exporting || workers.length === 0}>
+                    {exporting ? 'Building ZIP…' : 'Export ZIP'}
+                  </button>
+                  <button className="danger" onClick={() => { setMenuOpen(false); setConfirmDeleteAll(true); }} disabled={workers.length === 0}>
+                    Delete All
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {screen === 'list' && (
         <WorkerList
           workers={workers}
           onDelete={setDeleteTarget}
-          onExport={handleExport}
-          exporting={exporting}
-          onNew={goForm}
         />
       )}
 
       {screen === 'form' && (
         <WorkerForm
+          key={formKey}
           onSubmit={handleFormSubmit}
           initialName={lastForm.name}
           initialDevice={lastForm.device}
         />
+      )}
+
+      {screen === 'list' && (
+        <div className="bottom-bar">
+          <div className="bottom-bar-inner">
+            <button className="btn-new" onClick={goForm}>+ New Worker</button>
+          </div>
+        </div>
       )}
 
       {screen === 'camera' && pendingWorker && (
@@ -688,6 +806,21 @@ function App() {
           onCancel={handleCaptureCancel}
           showToast={showToast}
         />
+      )}
+
+      {menuOpen && (
+        <div style={{position:'fixed',inset:0,zIndex:50}} onClick={() => setMenuOpen(false)}></div>
+      )}
+
+      {confirmDeleteAll && (
+        <div className="sheet-backdrop" onClick={() => setConfirmDeleteAll(false)}>
+          <div className="sheet" onClick={e => e.stopPropagation()}>
+            <div className="sheet-title">Delete all workers?</div>
+            <div className="sheet-sub">This permanently removes all {workers.length} workers, their photos and metadata from this device. This cannot be undone.</div>
+            <button className="btn-danger" onClick={handleDeleteAll}>Delete Everything</button>
+            <button className="btn-ghost" onClick={() => setConfirmDeleteAll(false)}>Cancel</button>
+          </div>
+        </div>
       )}
 
       {deleteTarget && (
