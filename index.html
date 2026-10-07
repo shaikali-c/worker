@@ -24,7 +24,7 @@
             crossorigin
             src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"
         ></script>
-        <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+        <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
         <script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
 
         <style>
@@ -1151,6 +1151,7 @@
                             ref={inputRef}
                             className="otp-hidden"
                             type="text"
+                            autoFocus
                             inputMode="numeric"
                             pattern="\d*"
                             maxLength={5}
@@ -1173,26 +1174,18 @@
             /* ============================================================
    View 1 — Worker form
 ============================================================ */
-            function WorkerForm({ onSubmit, initialName, initialDevice }) {
-                const [name, setName] = useState(initialName || "");
+            function WorkerForm({ onSubmit, initialDevice }) {
                 const [device, setDevice] = useState(initialDevice || "");
                 const [errors, setErrors] = useState({});
-                const nameRef = useRef(null);
-
-                useEffect(() => {
-                    if (nameRef.current) nameRef.current.focus();
-                }, []);
 
                 const submit = (e) => {
                     e.preventDefault();
                     const errs = {};
-                    const trimmed = name.trim();
-                    if (!trimmed) errs.name = "Worker name is required";
                     if (!/^\d{5}$/.test(device))
                         errs.device = "Device ID must be exactly 5 digits";
                     setErrors(errs);
                     if (Object.keys(errs).length === 0) {
-                        onSubmit({ name: trimmed, deviceId: device });
+                        onSubmit({ deviceId: device });
                     }
                 };
 
@@ -1203,27 +1196,11 @@
                             Worker <em>capture</em>
                         </h1>
                         <p className="sub">
-                            Enter the worker's details. The camera opens
-                            immediately after.
+                            Enter the device ID. The camera opens immediately
+                            after.
                         </p>
 
                         <form onSubmit={submit} autoComplete="off">
-                            <div className="field">
-                                <label>Worker Name</label>
-                                <input
-                                    ref={nameRef}
-                                    type="text"
-                                    value={name}
-                                    onChange={(e) => setName(e.target.value)}
-                                    placeholder="e.g. Ravi Kumar"
-                                    className={errors.name ? "input-error" : ""}
-                                    enterKeyHint="next"
-                                />
-                                <div className="field-hint">
-                                    {errors.name || ""}
-                                </div>
-                            </div>
-
                             <OtpInput
                                 value={device}
                                 onChange={setDevice}
@@ -1459,7 +1436,7 @@
                                 {stageLabel.name}
                             </div>
                             <div className="cam-stage-sub">
-                                {worker.name} · {worker.deviceId}
+                                ID {worker.deviceId}
                             </div>
                         </div>
 
@@ -1587,10 +1564,14 @@
                                     </div>
                                     <div className="worker-info">
                                         <div className="worker-name">
-                                            {w.name}
+                                            ID {w.deviceId}
                                         </div>
                                         <div className="worker-meta">
-                                            ID {w.deviceId}
+                                            {w.createdAt
+                                                ? new Date(
+                                                      w.createdAt,
+                                                  ).toLocaleDateString()
+                                                : ""}
                                         </div>
                                     </div>
                                     <button
@@ -1613,10 +1594,7 @@
                 const [screen, setScreen] = useState("list"); // list | form | camera
                 const [workers, setWorkers] = useState([]);
                 const [pendingWorker, setPendingWorker] = useState(null);
-                const [lastForm, setLastForm] = useState({
-                    name: "",
-                    device: "",
-                });
+                const [lastForm, setLastForm] = useState({ device: "" });
                 const [formKey, setFormKey] = useState(0);
                 const [toast, setToast] = useState("");
                 const [exporting, setExporting] = useState(false);
@@ -1646,20 +1624,19 @@
                 }, []);
 
                 const goForm = () => {
-                    setLastForm({ name: "", device: "" });
+                    setLastForm({ device: "" });
                     setFormKey((k) => k + 1);
                     setScreen("form");
                 };
 
-                const handleFormSubmit = ({ name, deviceId }) => {
-                    setLastForm({ name, device: deviceId });
-                    setPendingWorker({ name, deviceId });
+                const handleFormSubmit = ({ deviceId }) => {
+                    setLastForm({ device: deviceId });
+                    setPendingWorker({ deviceId });
                     setScreen("camera");
                 };
 
                 const handleCaptureComplete = async (workerBlob, handBlob) => {
                     await idbAdd({
-                        name: pendingWorker.name,
                         deviceId: pendingWorker.deviceId,
                         workerPhoto: workerBlob,
                         handPhoto: handBlob,
@@ -1667,7 +1644,7 @@
                     });
                     await refresh();
                     setPendingWorker(null);
-                    setLastForm({ name: "", device: "" });
+                    setLastForm({ device: "" });
                     setFormKey((k) => k + 1);
                     setScreen("form");
                     showToast("Saved — ready for next worker");
@@ -1721,7 +1698,7 @@
                             folder.file("worker.jpg", w.workerPhoto);
                             folder.file("hand.jpg", w.handPhoto);
                             manifest.push({
-                                name: w.name,
+                                name: w.deviceId,
                                 deviceID: w.deviceId,
                                 workerPhoto: n + "/worker.jpg",
                                 hand: n + "/hand.jpg",
@@ -1855,7 +1832,6 @@
                             <WorkerForm
                                 key={formKey}
                                 onSubmit={handleFormSubmit}
-                                initialName={lastForm.name}
                                 initialDevice={lastForm.device}
                             />
                         )}
@@ -1939,7 +1915,7 @@
                                     onClick={(e) => e.stopPropagation()}
                                 >
                                     <div className="sheet-title">
-                                        Delete {deleteTarget.name}?
+                                        Delete worker {deleteTarget.deviceId}?
                                     </div>
                                     <div className="sheet-sub">
                                         This permanently removes both photos and
