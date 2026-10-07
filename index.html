@@ -315,6 +315,25 @@
             .btn-danger:active {
                 transform: scale(0.98);
             }
+            .badge {
+                display: inline-block;
+                margin-left: 8px;
+                padding: 2px 8px;
+                border-radius: 20px;
+                font-size: 10px;
+                letter-spacing: 0.1em;
+                text-transform: uppercase;
+                border: 1px solid var(--line2);
+                color: var(--faint);
+            }
+            .badge.ok {
+                color: #7fd6a0;
+                border-color: rgba(127, 214, 160, 0.35);
+            }
+            .badge.wait {
+                color: #e8c36a;
+                border-color: rgba(232, 195, 106, 0.35);
+            }
             /* camera */
             .cam-view {
                 padding: 0;
@@ -614,6 +633,13 @@
         <script type="text/babel" data-presets="react">
             const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
+            /* ---------- Supabase config: paste your two values ---------- */
+            const SB_URL = "https://edpgvhwfhjxdlofvfdqg.supabase.co"; // https://xxxx.supabase.co
+            const SB_KEY = "sb_publishable_aDDbP8edTbDfxz2eEr5rJg_udr_22ej"; // sb_publishable_... (never the secret key)
+            const SB_BUCKET = "workers";
+            const CLOUD_ON =
+                /^https:\/\//.test(SB_URL) && !/^PASTE/.test(SB_KEY);
+
             /* ---------- Icons ---------- */
             const Svg = ({ size = 15, children }) => (
                 <svg
@@ -650,6 +676,12 @@
                     <path d="M8 2.4v7.2" />
                     <path d="M5.2 6.8 8 9.6l2.8-2.8" />
                     <path d="M2.8 11.6v1.2a1.4 1.4 0 0 0 1.4 1.4h7.6a1.4 1.4 0 0 0 1.4-1.4v-1.2" />
+                </Svg>
+            );
+            const IconSync = () => (
+                <Svg>
+                    <path d="M13 8a5 5 0 0 1-8.6 3.5M3 8a5 5 0 0 1 8.6-3.5" />
+                    <path d="M12 2v3H9M4 14v-3h3" />
                 </Svg>
             );
             const IconPlus = () => (
@@ -715,6 +747,94 @@
                 idb("readonly", (s) => s.getAll()).then((a) => a || []);
             const idbDelete = (id) => idb("readwrite", (s) => s.delete(id));
             const idbClear = () => idb("readwrite", (s) => s.clear());
+            // Patch a record only if it still exists (so a delete mid-upload isn't undone)
+            async function idbUpdate(id, patch) {
+                const db = await openDB();
+                return new Promise((res, rej) => {
+                    const tx = db.transaction("workers", "readwrite");
+                    const st = tx.objectStore("workers");
+                    const g = st.get(id);
+                    g.onsuccess = () => {
+                        if (g.result) st.put({ ...g.result, ...patch });
+                    };
+                    tx.oncomplete = () => res();
+                    tx.onerror = () => rej(tx.error);
+                });
+            }
+
+            /* ---------- Cloud upload (Supabase REST, no SDK) ---------- */
+            const uuid = () =>
+                crypto.randomUUID
+                    ? crypto.randomUUID()
+                    : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(
+                          /[xy]/g,
+                          (c) => {
+                              const r = (Math.random() * 16) | 0;
+                              return (c === "x" ? r : (r & 3) | 8).toString(16);
+                          },
+                      );
+            const sbHeaders = (extra) =>
+                Object.assign(
+                    { apikey: SB_KEY },
+                    SB_KEY.startsWith("eyJ")
+                        ? { Authorization: "Bearer " + SB_KEY }
+                        : {},
+                    extra,
+                );
+            const isDuplicate = (status, text) =>
+                status === 409 || /duplicate|already exists/i.test(text);
+
+            async function sbUploadFile(path, blob) {
+                const res = await fetch(
+                    SB_URL + "/storage/v1/object/" + SB_BUCKET + "/" + path,
+                    {
+                        method: "POST",
+                        headers: sbHeaders({ "Content-Type": "image/jpeg" }),
+                        body: blob,
+                    },
+                );
+                if (res.ok) return;
+                const t = await res.text();
+                if (!isDuplicate(res.status, t))
+                    throw new Error("storage " + res.status + " " + t);
+            }
+
+            async function uploadWorker(w, userName) {
+                const clientId = w.clientId || uuid();
+                if (!w.clientId) await idbUpdate(w.id, { clientId });
+                const base = w.deviceId + "/" + clientId;
+                const wp = base + "/worker.jpg",
+                    hp = base + "/hand.jpg";
+                await Promise.all([
+                    sbUploadFile(wp, w.workerPhoto),
+                    sbUploadFile(hp, w.handPhoto),
+                ]);
+                const res = await fetch(SB_URL + "/rest/v1/workers", {
+                    method: "POST",
+                    headers: sbHeaders({
+                        "Content-Type": "application/json",
+                        Prefer: "return=minimal",
+                    }),
+                    body: JSON.stringify({
+                        client_id: clientId,
+                        device_id: w.deviceId,
+                        user_name: userName || null,
+                        worker_photo_path: wp,
+                        hand_photo_path: hp,
+                        worker_captured_at: w.workerCapturedAt,
+                        hand_captured_at: w.handCapturedAt,
+                    }),
+                });
+                if (!res.ok) {
+                    const t = await res.text();
+                    if (!isDuplicate(res.status, t))
+                        throw new Error("table " + res.status + " " + t);
+                }
+                await idbUpdate(w.id, {
+                    synced: true,
+                    syncedAt: new Date().toISOString(),
+                });
+            }
 
             /* ---------- Fast capture ----------
    Why the old version was slow: after the first photo it called
@@ -1196,13 +1316,19 @@
                       })
                     : "";
 
-            function WorkerList({ workers, onDelete }) {
+            function WorkerList({ workers, onDelete, cloudOn }) {
+                const pending = workers.filter((w) => !w.synced).length;
                 return (
                     <div className="view list-view">
                         <h2 className="list-title">
                             Captured <em>workers</em>
                         </h2>
-                        <div className="list-sub">{workers.length} total</div>
+                        <div className="list-sub">
+                            {workers.length} total
+                            {cloudOn && pending
+                                ? " · " + pending + " waiting to upload"
+                                : ""}
+                        </div>
                         {workers.length === 0 ? (
                             <div className="empty">
                                 <div className="empty-serif">
@@ -1226,6 +1352,16 @@
                                         </div>
                                         <div className="worker-meta">
                                             {fmt(w.workerCapturedAt)}
+                                            {cloudOn &&
+                                                (w.synced ? (
+                                                    <span className="badge ok">
+                                                        Synced
+                                                    </span>
+                                                ) : (
+                                                    <span className="badge wait">
+                                                        Pending
+                                                    </span>
+                                                ))}
                                         </div>
                                     </div>
                                     <button
@@ -1266,15 +1402,73 @@
                     const all = await idbGetAll();
                     setWorkers(all.sort((a, b) => a.id - b.id));
                 }, []);
+                const nameRef = useRef(userName);
+                nameRef.current = userName;
+                const syncing = useRef(false);
+                const syncAll = useCallback(async (manual) => {
+                    if (!CLOUD_ON) {
+                        if (manual === true)
+                            showToast("Add your Supabase URL and key first");
+                        return;
+                    }
+                    if (syncing.current) return;
+                    if (!navigator.onLine) {
+                        if (manual === true)
+                            showToast("You're offline — will upload later");
+                        return;
+                    }
+                    syncing.current = true;
+                    let ok = 0,
+                        fail = 0;
+                    try {
+                        const all = await idbGetAll();
+                        for (const w of all.filter(
+                            (x) => x.workerPhoto && x.handPhoto && !x.synced,
+                        )) {
+                            try {
+                                await uploadWorker(w, nameRef.current);
+                                ok++;
+                            } catch (e) {
+                                console.error("Upload failed", e);
+                                fail++;
+                            }
+                        }
+                        await refresh();
+                    } catch (e) {
+                        console.error(e);
+                    }
+                    syncing.current = false;
+                    if (fail)
+                        showToast(
+                            "Upload failed for " + fail + " — will retry",
+                        );
+                    else if (ok)
+                        showToast(
+                            "Uploaded " + ok + " worker" + (ok > 1 ? "s" : ""),
+                        );
+                    else if (manual === true)
+                        showToast("Everything is already uploaded");
+                }, []);
+
                 useEffect(() => {
-                    refresh().catch(() =>
-                        showToast("Could not load saved workers"),
+                    refresh().then(
+                        () => syncAll(),
+                        () => showToast("Could not load saved workers"),
                     );
+                    const on = () => syncAll();
+                    window.addEventListener("online", on);
+                    const t = setInterval(on, 60000); // retry failed uploads every minute
+                    return () => {
+                        window.removeEventListener("online", on);
+                        clearInterval(t);
+                    };
                 }, []);
 
                 const handleComplete = async (s) => {
                     await idbAdd({
                         deviceId: pendingId,
+                        clientId: uuid(),
+                        synced: false,
                         workerPhoto: s.worker,
                         handPhoto: s.hand,
                         workerCapturedAt: s.workerAt,
@@ -1284,6 +1478,7 @@
                     setPendingId(null);
                     setScreen("form");
                     showToast("Worker saved");
+                    syncAll();
                 };
 
                 const confirmDelete = async () => {
@@ -1432,6 +1627,19 @@
                                                             </>
                                                         )}
                                                     </button>
+                                                    {CLOUD_ON && (
+                                                        <button
+                                                            onClick={() => {
+                                                                setMenuOpen(
+                                                                    false,
+                                                                );
+                                                                syncAll(true);
+                                                            }}
+                                                        >
+                                                            <IconSync />
+                                                            Sync now
+                                                        </button>
+                                                    )}
                                                     <button
                                                         onClick={() => {
                                                             setMenuOpen(false);
@@ -1479,6 +1687,7 @@
                             <WorkerList
                                 workers={workers}
                                 onDelete={setDeleteTarget}
+                                cloudOn={CLOUD_ON}
                             />
                         )}
                         {screen === "form" && (
